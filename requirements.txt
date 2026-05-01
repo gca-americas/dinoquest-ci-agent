@@ -1,0 +1,10 @@
+google-adk>=1.0.0
+a2a-sdk>=0.3.4,<0.4.0
+uvicorn>=0.30.0
+google-cloud-build>=3.24.0
+google-cloud-storage>=2.0.0
+google-cloud-pubsub>=2.0.0
+google-cloud-secret-manager>=2.0.0
+google-auth>=2.0.0
+requests>=2.32.0
+python-dotenv>=1.0.0

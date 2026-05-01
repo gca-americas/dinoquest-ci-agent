@@ -1,0 +1,36 @@
+# Tells gcloud builds submit what to exclude from the upload tarball.
+# Syntax mirrors .gitignore.
+
+.git/
+.gitignore
+.dockerignore
+.gcloudignore
+
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+.pytest_cache/
+
+.env
+.env.local
+.env.*.local
+.env.example
+
+# Credentials
+*.key
+service-account*.json
+*-credentials.json
+*-key.json
+
+# Runtime artifacts
+skills/learned/
+*.log
+
+# Local test / dev files (not needed in build upload)
+test-build.yaml
+
+# macOS
+.DS_Store
+
+README.md
