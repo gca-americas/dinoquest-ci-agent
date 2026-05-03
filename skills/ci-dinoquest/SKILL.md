@@ -69,8 +69,7 @@ steps as pending so the caller can see what is coming:
                  ▼
   ┌──────────────────────────────────────────┐
   │              Cloud Build                 │
-  │  Step 1: npm ci && npm run build         │  ← FRONTEND or FULL
-  │  Step 2: docker build && push image      │  ← always (if Step 1 passes)
+  │  docker build && push image              │
   └──────────────────┬───────────────────────┘
                      │
                      ▼
@@ -96,18 +95,18 @@ All repository context comes from the GitHub API — no local git checkout.
 
 ### 2a: Get PR details
 
-If a `pr_number` was provided in the request, call `_get_pr(pr_number)` to retrieve:
+If a `pr_number` was provided in the request, call `get_pr(pr_number)` to retrieve:
 - `BRANCH` — the PR's head branch name
 - `COMMIT_SHA` — the PR's head SHA
 - `PR_TITLE` — used for fast-track and scope decisions
 - `PR_BODY` — for context
 
-If no `pr_number` was provided but a `branch_name` was, call `_list_prs(branch_name)` to
+If no `pr_number` was provided but a `branch_name` was, call `list_prs(branch_name)` to
 find the open PR for that branch. Use the first result.
 
 ### 2b: Get changed files
 
-Call `_get_pr_files(pr_number)` to retrieve the full list of changed filenames.
+Call `get_pr_files(pr_number)` to retrieve the full list of changed filenames.
 Store as `CHANGED_FILES` — used for scope classification in Step 3.
 
 ### 2c: Create PR if needed, then enrich body from diff
@@ -121,11 +120,11 @@ Store as `CHANGED_FILES` — used for scope classification in Step 3.
   Derive from branch name: `level_2` → `"feat: add Level 2 gameplay and backend changes"`,
   `fix-oom` → `"fix: resolve OOM in leaderboard endpoint"`.
 - `body`: placeholder — `"CI pipeline initialising — diff summary will be added shortly."`
-- Call `_create_pr(title, body, head=BRANCH, base="main")` → captures `PR_NUMBER` and `COMMIT_SHA`.
+- Call `create_pr(title, body, head=BRANCH, base="main")` → captures `PR_NUMBER` and `COMMIT_SHA`.
 
 **Step 2 — MANDATORY: Fetch the diff and post rich PR summary.**
-Immediately after `_create_pr` (or after finding the existing PR), call `_scan_pr_diff(PR_NUMBER)`.
-Then IMMEDIATELY call `_post_pr_comment(PR_NUMBER, body)` with the rich summary below.
+Immediately after `create_pr` (or after finding the existing PR), call `scan_pr_diff(PR_NUMBER)`.
+Then IMMEDIATELY call `post_pr_comment(PR_NUMBER, body)` with the rich summary below.
 **Do NOT skip this step. Do NOT proceed to Step 3 until both tool calls are done.**
 
 Post this exact structure as the PR comment:
@@ -148,8 +147,8 @@ dependency versions, game mechanics added/changed. Be specific, not generic.>
 <LOW / MEDIUM / HIGH> — <one sentence explaining why>
 ```
 
-If one already exists (409 / duplicate error from `_create_pr`), use the existing PR from 2a
-and still call `_scan_pr_diff` + `_post_pr_comment` to post the rich summary.
+If one already exists (409 / duplicate error from `create_pr`), use the existing PR from 2a
+and still call `scan_pr_diff` + `post_pr_comment` to post the rich summary.
 
 Capture:
 - `PR_NUMBER` — for later comment posting
@@ -218,22 +217,22 @@ submitting to Cloud Build.
 
 ### 4a — Hardcoded Secrets
 
-Call `_scan_pr_diff(pr_number)` to get the raw diff. Check for:
+Call `scan_pr_diff(pr_number)` to get the raw diff. Check for:
 
 ```
 Patterns to flag: (api_key|secret|password|token)\s*=
 Exclude safe patterns: os\.getenv, process\.env, getenv
 ```
 
-If any matches are found → **fail CI immediately.** Call `_post_commit_status` with
+If any matches are found → **fail CI immediately.** Call `post_commit_status` with
 `state=failure` and description "Potential hardcoded credential detected — review before merging."
-Then call `_post_pr_comment` with the specific lines found. Stop.
+Then call `post_pr_comment` with the specific lines found. Stop.
 
 Also check: if `allow_origins=["*"]` appears in the diff → fail CI with security note.
 
 ### 4b — Prompt Injection Check (Advisory Only)
 
-Use the `_scan_pr_diff` output already fetched in 4a to check:
+Use the `scan_pr_diff` output already fetched in 4a to check:
 1. Does `backend/main.py` in the diff call `check_prompt_safety` before the Gemini API call?
 2. Does `backend/requirements.txt` in the diff include `google-cloud-modelarmor`?
 
@@ -248,29 +247,29 @@ the CI report under "Security Scan". Do not modify any files. Do not stop the pi
 
 ### 5a — Backend pytest (outside Cloud Build)
 
-If scope is `BACKEND` or `FULL`, call `_run_backend_tests(pr_number)` to run
+If scope is `BACKEND` or `FULL`, call `run_ci_backend_tests(branch_name)` to run
 `pytest backend/tests/ -v` against the PR branch source.
 
-- If tests **fail** → call `_post_commit_status(sha, state="failure", description="Backend tests failed")`,
-  call `_post_pr_comment` with the failure output, and stop. Do not submit to Cloud Build.
+- If tests **fail** → call `post_commit_status(sha, state="failure", description="Backend tests failed")`,
+  call `post_pr_comment` with the failure output, and stop. Do not submit to Cloud Build.
 - If tests **pass** (or scope is `FRONTEND`) → proceed to 5b.
 
-### 5b — Cloud Build (frontend check + Docker push)
+### 5b — Cloud Build (Docker build + push)
 
-Call `_submit_build(commit_sha, branch_name, test_scope)`.
+Call `submit_build(commit_sha, branch_name, test_scope)`.
 The tool constructs the image URI from server-side configuration. Never pass an image URI yourself.
 
 The build steps executed inside Cloud Build:
 
-| Scope | Step 1 | Step 2 |
-|---|---|---|
-| `BACKEND` | _(skipped — tests ran in 5a)_ | `docker build` |
-| `FRONTEND` | `npm ci && npm run build` | `docker build` |
-| `FULL` | `npm ci && npm run build` | `docker build` |
+| Scope | Step |
+|---|---|
+| `BACKEND` | `docker build && push` |
+| `FRONTEND` | `docker build && push` |
+| `FULL` | `docker build && push` |
 
 If the Cloud Build step exits non-zero, Docker push is skipped.
 
-Poll for build completion by calling `_get_build_status(build_id)` every 30 seconds.
+Poll for build completion by calling `get_ci_build_status(build_id)` every 30 seconds.
 Time out after 15 minutes.
 
 **If build fails:** use your reasoning to classify the failure from the error message and log:
@@ -287,30 +286,30 @@ For all failures: post a clear diagnosis as the PR comment. Do not contact any e
 
 ## Step 6: Verify Image in Artifact Registry
 
-After a successful build, call `_verify_image(image_tag)` to confirm the image was pushed.
+After a successful build, call `verify_image(image_tag)` to confirm the image was pushed.
 Confirm `found: true`. Record the full image URI for use by CDAgent.
 
 ---
 
 ## Step 7: Post Status to GitHub
 
-**MANDATORY: Always call `_post_commit_status` FIRST — before anything else in this step.**
+**MANDATORY: Always call `post_commit_status` FIRST — before anything else in this step.**
 This overwrites any previous run's stale commit status. Never skip it regardless of outcome.
 
 **On success:**
-Call `_post_commit_status(sha, state="success", description="CI passed — image pushed to Artifact Registry")`
+Call `post_commit_status(sha, state="success", description="CI passed — image pushed to Artifact Registry")`
 
 **On failure:**
-Call `_post_commit_status(sha, state="failure", description="<short reason>")`
+Call `post_commit_status(sha, state="failure", description="<short reason>")`
 
-**MANDATORY: Then call `_post_pr_comment(pr_number, body)` with the full CI report below.**
+**MANDATORY: Then call `post_pr_comment(pr_number, body)` with the full CI report below.**
 **Do NOT skip either call. Both are required on every CI run.**
 
 ---
 
 ## Step 8: Emit CI Report
 
-Post the following as the PR comment via `_post_pr_comment`. Use the same content as your
+Post the following as the PR comment via `post_pr_comment`. Use the same content as your
 final Slack reply text. Fill in ticks (✅) or crosses (❌) for each step based on actual results.
 
 ```
@@ -341,7 +340,6 @@ DinoQuest CI Pipeline — <SCOPE> scope
          │
          ▼
   Cloud Build             <✅/❌>  build_id: <id>
-  • Frontend npm build    <✅/❌/⏭️>
   • Docker build & push   <✅/❌>
          │
          ▼
@@ -400,15 +398,15 @@ A human might phrase it more loosely: *"add a test that asserts coins never exce
 
 ### Teaching workflow
 
-1. **Register the skill** — call `_register_skill(skill_name, description, detection_pattern, action)`.
+1. **Register the skill** — call `ci_register_skill(skill_name, description, detection_pattern, action)`.
    This emits the `skill_registered` event so the theater shows the sparkle animation.
 
-2. **Create a branch** — call `_create_branch("ci-skill-<skill_name>")`.
+2. **Create a branch** — call `create_branch("ci-skill-<skill_name>")`.
    Use only lowercase letters, numbers, and hyphens in the skill name portion.
    The tool automatically appends a `YY_MM_DD_HH_MM` timestamp — use the `branch` field
-   from the returned JSON in all subsequent `_write_file` and `_create_pr` calls.
+   from the returned JSON in all subsequent `write_file` and `create_pr` calls.
 
-3. **Write the test file** — call `_write_file` with:
+3. **Write the test file** — call `write_file` with:
    - `path`: `backend/tests/test_<skill_name>.py`
    - `content`: a self-contained pytest module with one or more test cases that would
      have caught the described bug. Follow the style in `backend/tests/test_main.py`:
@@ -417,7 +415,7 @@ A human might phrase it more loosely: *"add a test that asserts coins never exce
    - `commit_message`: `"ci: add regression test for <skill_name> (taught by DinoAgent)"`
    - `branch`: the branch created in step 2
 
-4. **Open a PR** — call `_create_pr` with:
+4. **Open a PR** — call `create_pr` with:
    - `head`: the branch from step 2
    - `base`: `"main"`
    - `title`: `"ci: regression test — <skill_name>"`
@@ -456,10 +454,10 @@ class TestCoinCap:
 
 ## Edge Cases
 
-- **No PR for this branch**: If `_list_prs` returns nothing, create one via `_create_pr`.
+- **No PR for this branch**: If `list_prs` returns nothing, create one via `create_pr`.
 - **Already on main**: Skip PR creation — CI on main should not auto-file PRs. Run build and report directly.
 - **`GEMINI_API_KEY` missing**: Backend tests will fail with `ValueError`. Note this in the report as a config issue, not a code bug. Do not fail CI — flag as warning only.
 - **Cloud Build quota exceeded**: Report the quota error and retry once after 60 seconds.
 - **TypeScript errors in unchanged files**: Flag as warning, do not block CI.
 - **Build takes >10 min**: Poll every 30s. If >15 min, cancel and report timeout.
-- **Artifact Registry repo doesn't exist**: Call `_create_artifact_repo()` then retry the build.
+- **Artifact Registry repo doesn't exist**: Report the error as an infrastructure issue. Post a failure commit status and PR comment explaining the repo must be created manually before CI can push images.

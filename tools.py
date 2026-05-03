@@ -169,9 +169,35 @@ def submit_cloud_build(
     """
     if _DEMO_MODE:
         import uuid
+        # Determine source tag: incident_* branches use the pre-built incident_solution image,
+        # all other branches (e.g. level_2) use the pre-built level_2 image.
+        source_tag = "incident_solution" if branch_name.startswith("incident") else "level_2"
+        image_base = image_uri.rsplit(":", 1)[0]  # strip :latest
+        registry_host = image_base.split("/")[0]
+        image_path = "/".join(image_base.split("/")[1:])
         fake_id = f"demo-{uuid.uuid4().hex[:8]}"
-        log.info("[DEMO] Skipping real Cloud Build | fake_build_id=%s image=%s", fake_id, image_uri)
-        return json.dumps({"build_id": fake_id, "status": "QUEUED", "image_uri": image_uri})
+        latest_uri = f"{image_base}:latest"
+        try:
+            creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+            creds.refresh(google.auth.transport.requests.Request())
+            auth_header = {"Authorization": f"Bearer {creds.token}"}
+            get_resp = requests.get(
+                f"https://{registry_host}/v2/{image_path}/manifests/{source_tag}",
+                headers={**auth_header, "Accept": "application/vnd.docker.distribution.manifest.v2+json"},
+                timeout=30,
+            )
+            get_resp.raise_for_status()
+            put_resp = requests.put(
+                f"https://{registry_host}/v2/{image_path}/manifests/latest",
+                data=get_resp.content,
+                headers={**auth_header, "Content-Type": get_resp.headers.get("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")},
+                timeout=30,
+            )
+            put_resp.raise_for_status()
+            log.info("[DEMO] Retagged %s → latest | fake_build_id=%s image=%s", source_tag, fake_id, latest_uri)
+        except Exception as e:
+            log.warning("[DEMO] Retag failed, continuing anyway: %s", e)
+        return json.dumps({"build_id": fake_id, "status": "QUEUED", "image_uri": latest_uri})
 
     repo_resource = (
         f"projects/{project_id}/locations/{_CB_REGION}"

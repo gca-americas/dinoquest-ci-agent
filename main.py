@@ -12,10 +12,12 @@ Set HOST/PORT/PROTOCOL to match the public URL so the agent card URL
 is correct for A2A callers (DinoAgent, etc.).
 """
 
+import os
+os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
+
 import asyncio
 import json
 import logging
-import os
 import threading
 import uuid
 
@@ -109,6 +111,7 @@ def _run_and_reply(task_id: str, message: str, correlation_id: str, reply_fn) ->
         result = asyncio.run(_run_agent(task_id, message, correlation_id))
         reply_fn(result)
     except Exception as e:
+        log.error("Agent run error [task=%s]: %s", task_id, str(e)[:500])
         log.exception("Background agent run failed for task %s", task_id)
         reply_fn(f"CI run failed: {e}")
 

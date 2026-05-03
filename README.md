@@ -227,12 +227,14 @@ gcloud builds submit --tag $IMAGE . --project=$PROJECT_ID
 ```bash
 SA="ci-agent@${PROJECT_ID}.iam.gserviceaccount.com"
 TOPIC="projects/${PROJECT_ID}/topics/harness-events"
-GITHUB_REPO_URL="https://github.com/weimeilin79/dinoquest-io"
 CLOUD_BUILD_CONNECTION="weimeilin-repo"
 CLOUD_BUILD_REPO="weimeilin79-dinoquest-io"
 CLOUD_BUILD_REGION="us-central1"
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
 CDAGENT_URL=https://cd-agent-${PROJECT_NUMBER}.us-central1.run.app
+DINOAGENT_URL=https://dino-agent-${PROJECT_NUMBER}.us-central1.run.app
+GITHUB_OWNER=weimeilin79
+GITHUB_REPO=dinoquest-io
 
 gcloud run deploy ci-agent \
   --image=$IMAGE \
@@ -242,10 +244,11 @@ gcloud run deploy ci-agent \
   --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" \
   --set-env-vars="GOOGLE_GENAI_USE_VERTEXAI=True" \
   --set-env-vars="HARNESS_EVENTS_TOPIC=${TOPIC}" \
-  --set-env-vars="GITHUB_REPO_URL=${GITHUB_REPO_URL}" \
   --set-env-vars="SLACK_WEBHOOK_SECRET=projects/${PROJECT_ID}/secrets/ci-slack-webhook/versions/latest" \
+  --set-env-vars="GITHUB_OWNER=${GITHUB_OWNER},GITHUB_REPO=${GITHUB_REPO}" \
   --set-env-vars="CLOUD_BUILD_CONNECTION=${CLOUD_BUILD_CONNECTION},CLOUD_BUILD_REPO=${CLOUD_BUILD_REPO},CLOUD_BUILD_REGION=${CLOUD_BUILD_REGION}" \
   --set-env-vars="CDAGENT_URL=${CDAGENT_URL}" \
+  --set-env-vars="DINOAGENT_URL=${DINOAGENT_URL}" \
   --set-secrets="GITHUB_TOKEN=github-token:latest" \
   --allow-unauthenticated \
   --timeout=600 \
@@ -255,7 +258,7 @@ gcloud run deploy ci-agent \
 
 Print log
 ```
-gcloud alpha logging tail "resource.type=cloud_run_revision AND resource.labels.service_name=ci-agent" --project=gca-america-virtual-ta-test --format="value(timestamp,textPayload)"
+gcloud alpha logging tail "resource.type=cloud_run_revision AND resource.labels.service_name=ci-agent" --project=$PROJECT_ID --format="value(timestamp,textPayload)"
 ```
 
 ### 3. Updating after code changes
@@ -269,19 +272,46 @@ gcloud run services update ci-agent --image=$IMAGE --region=us-central1
 
 ## Demo mode (keynote / live demo)
 
-Set `DEMO_MODE=true` in Cloud Run env vars and the full pipeline runs end-to-end in ~60 seconds.
-Steps 1–4 (PR read, scope classification, security scan) and steps 7–8 (GitHub commit status,
-PR comment, CI report) all hit real APIs. Only the Cloud Build wait is skipped.
+Set `DEMO_MODE=true` and the full pipeline runs end-to-end in ~60 seconds.
+GitHub API calls (PR read, diff scan, commit status, PR comment) all hit real APIs.
+Cloud Build is skipped — instead, a pre-built image already in Artifact Registry is
+retagged to `:latest` so CDAgent can deploy it immediately.
+
+### Image retagging rules
+
+| Branch pattern | Source tag retagged to `:latest` |
+|---|---|
+| `incident_*` (from RemediationAgent) | `incident_solution` |
+| anything else (e.g. `level_2`) | `level_2` |
+
+Pre-build the source images once before the demo:
+
+```bash
+# Build and tag the level_2 image
+gcloud builds submit --tag \
+  us-central1-docker.pkg.dev/${PROJECT_ID}/dinoquest/app:level_2 \
+  --project=$PROJECT_ID
+
+# Build and tag the incident solution image
+# (checkout the incident fix branch first, then:)
+gcloud builds submit --tag \
+  us-central1-docker.pkg.dev/${PROJECT_ID}/dinoquest/app:incident_solution \
+  --project=$PROJECT_ID
+```
+
+### Step comparison
 
 | Step | Real mode | Demo mode |
 |---|---|---|
 | Read PR, get files, scan diff | Live GitHub API | Live GitHub API |
 | Scope classification | Agent reasons | Agent reasons |
 | Security scan | Real diff check | Real diff check |
-| Cloud Build submit | GCS upload + real build (~8 min) | Instant fake build ID |
+| Cloud Build submit | Real build (~8 min) | Retaggs pre-built image to `:latest` |
 | Build status poll | Polls every 30s | Returns SUCCESS immediately |
 | Artifact Registry verify | Real API check | Returns `found: true` |
 | Post commit status + PR comment | Live GitHub API | Live GitHub API |
+
+### Enable / disable
 
 ```bash
 # Enable demo mode
