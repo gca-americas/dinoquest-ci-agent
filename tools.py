@@ -119,7 +119,7 @@ def run_backend_tests(
                 "id": "test",
                 "name": "python:3.12-slim",
                 "entrypoint": "bash",
-                "args": ["-c", "pip install -r backend/requirements.txt pytest && pytest backend/tests/ -v"],
+                "args": ["-c", "pip install -r backend/requirements.txt pytest && PYTHONPATH=/workspace:/workspace/backend pytest backend/tests/ -v"],
             }
         ],
         "source": {
