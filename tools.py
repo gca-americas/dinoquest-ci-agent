@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 GITHUB_API = "https://api.github.com"
 _DEMO_MODE = os.environ.get("DEMO_MODE", "").lower() in ("1", "true", "yes")
 
-# Developer Connect (Cloud Build 2nd gen) repository config — must be set in env
+# Cloud Build 2nd gen (connectedRepository) config — must be set in env
 _CB_CONNECTION = os.environ["CLOUD_BUILD_CONNECTION"]
 _CB_REPO = os.environ["CLOUD_BUILD_REPO"]
 _CB_REGION = os.environ["CLOUD_BUILD_REGION"]
@@ -35,7 +35,7 @@ def _cb_client() -> cloudbuild_v1.CloudBuildClient:
 def _cb_rest_create_build(project_id: str, build_body: dict) -> dict:
     """Submit a Cloud Build job via REST API.
 
-    The Python SDK (even v3.36.0) doesn't expose DeveloperConnectConfig,
+    The Python SDK doesn't expose connectedRepository source config,
     but the REST API does. Returns the parsed operation JSON.
     """
     creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
@@ -105,7 +105,7 @@ def run_backend_tests(
 
     repo_resource = (
         f"projects/{project_id}/locations/{_CB_REGION}"
-        f"/connections/{_CB_CONNECTION}/gitRepositoryLinks/{_CB_REPO}"
+        f"/connections/{_CB_CONNECTION}/repositories/{_CB_REPO}"
     )
     sa_email = f"ci-agent@{project_id}.iam.gserviceaccount.com"
     bucket_name = f"{project_id}_cloudbuild"
@@ -123,8 +123,8 @@ def run_backend_tests(
             }
         ],
         "source": {
-            "developerConnectConfig": {
-                "gitRepositoryLink": repo_resource,
+            "connectedRepository": {
+                "repository": repo_resource,
                 "revision": f"refs/heads/{branch_name}",
             }
         },
@@ -201,7 +201,7 @@ def submit_cloud_build(
 
     repo_resource = (
         f"projects/{project_id}/locations/{_CB_REGION}"
-        f"/connections/{_CB_CONNECTION}/gitRepositoryLinks/{_CB_REPO}"
+        f"/connections/{_CB_CONNECTION}/repositories/{_CB_REPO}"
     )
     sa_email = f"ci-agent@{project_id}.iam.gserviceaccount.com"
     bucket_name = f"{project_id}_cloudbuild"
@@ -232,8 +232,8 @@ def submit_cloud_build(
         "steps": steps,
         "images": [image_uri],
         "source": {
-            "developerConnectConfig": {
-                "gitRepositoryLink": repo_resource,
+            "connectedRepository": {
+                "repository": repo_resource,
                 "revision": f"refs/heads/{branch_name}",
             }
         },

@@ -62,19 +62,23 @@ SA="ci-agent@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # Submit and read Cloud Build jobs
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:${SA}" --role="roles/cloudbuild.builds.editor"
+  --member="serviceAccount:${SA}" --role="roles/cloudbuild.builds.editor" \
+  --condition=None
 
 # Read images from Artifact Registry
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:${SA}" --role="roles/artifactregistry.reader"
+  --member="serviceAccount:${SA}" --role="roles/artifactregistry.reader" \
+  --condition=None
 
 # Call Vertex AI (Gemini model)
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:${SA}" --role="roles/aiplatform.user"
+  --member="serviceAccount:${SA}" --role="roles/aiplatform.user" \
+  --condition=None
 
 # Read secrets (GitHub token)
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:${SA}" --role="roles/secretmanager.secretAccessor"
+  --member="serviceAccount:${SA}" --role="roles/secretmanager.secretAccessor" \
+  --condition=None
 
 # Publish events to harness-events topic (run after topic is created)
 gcloud pubsub topics add-iam-policy-binding harness-events \
@@ -230,14 +234,14 @@ gcloud builds submit --tag $IMAGE . --project=$PROJECT_ID
 ```bash
 SA="ci-agent@${PROJECT_ID}.iam.gserviceaccount.com"
 TOPIC="projects/${PROJECT_ID}/topics/harness-events"
-CLOUD_BUILD_CONNECTION="weimeilin-repo"
-CLOUD_BUILD_REPO="weimeilin79-dinoquest-io"
+CLOUD_BUILD_CONNECTION="MyGithub"
+CLOUD_BUILD_REPO="weimeilin79-dinoquest"
 CLOUD_BUILD_REGION="us-central1"
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
 CDAGENT_URL=https://cd-agent-${PROJECT_NUMBER}.us-central1.run.app
 DINOAGENT_URL=https://dino-agent-${PROJECT_NUMBER}.us-central1.run.app
 GITHUB_OWNER=weimeilin79
-GITHUB_REPO=dinoquest-io
+GITHUB_REPO=dinoquest
 
 CI_AGENT_URL=$(gcloud run services describe ci-agent \
   --region=us-central1 --format="value(status.url)" --project=$PROJECT_ID | sed 's|https://||')
