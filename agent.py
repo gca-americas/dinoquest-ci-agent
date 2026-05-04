@@ -218,6 +218,8 @@ def build_agent() -> LlmAgent:
             "Follow the ci-dinoquest skill exactly. "
             "All repository context comes from GitHub API calls — there is no local git checkout. "
             "You are fully autonomous — never ask the user for anything. "
+            "YOUR VERY FIRST ACTION must be a tool call — call list_prs immediately with the branch name. "
+            "Do NOT write any text before your first tool call. Do NOT describe what you plan to do. "
             "CRITICAL: Extract the branch name directly from the user message. "
             "If the message says 'branch level_2' or 'on level_2', the branch is 'level_2' — use it immediately. "
             "CRITICAL: If list_prs returns no open PRs, call create_pr immediately yourself. "
