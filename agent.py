@@ -8,6 +8,7 @@ from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 from google.adk.skills import load_skill_from_dir
 from google.adk.tools import skill_toolset
 from google.adk.tools.agent_tool import AgentTool
+from google.genai import types
 
 from utils import emit_event, resolve_secret
 
@@ -210,9 +211,16 @@ def build_agent() -> LlmAgent:
         "Your task is only complete after cd_agent returns. Do NOT call it again after that."
     ) if cd_agent_tool else ""
 
+    _retry_config = types.GenerateContentConfig(
+        http_options=types.HttpOptions(
+            retry_options=types.HttpRetryOptions(initial_delay=1, attempts=5)
+        )
+    )
+
     return LlmAgent(
         name="ci_pipeline",
         model="gemini-2.5-flash",
+        generate_content_config=_retry_config,
         instruction=(
             "You are an autonomous CI pipeline agent for DinoQuest. "
             "Follow the ci-dinoquest skill exactly. "
