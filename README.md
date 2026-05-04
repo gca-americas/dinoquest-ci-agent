@@ -142,6 +142,9 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 |---|---|---|---|
 | `GOOGLE_CLOUD_PROJECT` | Yes | — | GCP project ID |
 | `GOOGLE_GENAI_USE_VERTEXAI` | Yes | — | Set to `True` |
+| `HOST` | **Yes (prod)** | `localhost` | Public hostname of this service — used to build the A2A agent card `url` field. Must be set to the Cloud Run hostname (e.g. `ci-agent-xxx-uc.a.run.app`) or callers will POST to `localhost` instead of this service. |
+| `PROTOCOL` | **Yes (prod)** | `http` | `https` in Cloud Run, `http` for local dev |
+| `PORT` | No | `8080` | Listening port |
 | `CLOUD_RUN_REGION` | No | `us-central1` | Region for Cloud Build and Artifact Registry |
 | `ARTIFACT_REGISTRY_REPO` | No | `dinoquest` | Artifact Registry repo name |
 | `GITHUB_OWNER` | No | `weimeilin79` | GitHub repo owner |
@@ -236,6 +239,9 @@ DINOAGENT_URL=https://dino-agent-${PROJECT_NUMBER}.us-central1.run.app
 GITHUB_OWNER=weimeilin79
 GITHUB_REPO=dinoquest-io
 
+CI_AGENT_URL=$(gcloud run services describe ci-agent \
+  --region=us-central1 --format="value(status.url)" --project=$PROJECT_ID | sed 's|https://||')
+
 gcloud run deploy ci-agent \
   --image=$IMAGE \
   --region=us-central1 \
@@ -243,6 +249,7 @@ gcloud run deploy ci-agent \
   --memory=1Gi \
   --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" \
   --set-env-vars="GOOGLE_GENAI_USE_VERTEXAI=True" \
+  --set-env-vars="HOST=${CI_AGENT_URL},PROTOCOL=https" \
   --set-env-vars="HARNESS_EVENTS_TOPIC=${TOPIC}" \
   --set-env-vars="SLACK_WEBHOOK_SECRET=projects/${PROJECT_ID}/secrets/ci-slack-webhook/versions/latest" \
   --set-env-vars="GITHUB_OWNER=${GITHUB_OWNER},GITHUB_REPO=${GITHUB_REPO}" \
