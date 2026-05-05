@@ -113,7 +113,6 @@ def run_backend_tests(
     build_body = {
         "serviceAccount": f"projects/{project_id}/serviceAccounts/{sa_email}",
         "logsBucket": f"gs://{bucket_name}",
-        "options": {"machineType": "E2_HIGHCPU_8"},
         "steps": [
             {
                 "id": "test",
@@ -228,7 +227,6 @@ def submit_cloud_build(
     build_body = {
         "serviceAccount": f"projects/{project_id}/serviceAccounts/{sa_email}",
         "logsBucket": f"gs://{bucket_name}",
-        "options": {"machineType": "E2_HIGHCPU_8"},
         "steps": steps,
         "images": [image_uri],
         "source": {
