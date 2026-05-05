@@ -53,9 +53,10 @@ def _cb_rest_create_build(project_id: str, build_body: dict) -> dict:
 
 
 def _make_tls12_context() -> ssl.SSLContext:
-    """TLS 1.2 context — Cloud Run egress proxy hangs Python 3.12 TLS 1.3 handshakes."""
+    """Force TLS 1.2 — Cloud Run egress proxy hangs Python 3.12 TLS 1.3 handshakes."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.maximum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_verify_locations(certifi.where())
     return ctx
 
@@ -71,9 +72,9 @@ def _gh(method: str, url: str, **kwargs) -> requests.Response:
     headers = kwargs.pop("headers", {})
     headers["Connection"] = "close"
     last_exc: Exception = RuntimeError("no attempts")
-    for attempt in range(3):
+    for attempt in range(5):
         if attempt:
-            time.sleep(2 ** attempt)
+            time.sleep(min(2 ** attempt, 30))
         try:
             with requests.Session() as session:
                 adapter = _TLS12Adapter(pool_connections=1, pool_maxsize=1, max_retries=0)

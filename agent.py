@@ -73,6 +73,9 @@ def build_agent() -> LlmAgent:
     def list_prs(branch: str) -> str:
         """Find open PRs for a branch. Use when no pr_number was provided."""
         log.info("CI [step 2a] list_prs | branch=%s", branch)
+        emit_event("CIAgent", "thinking",
+                   {"summary": f"Generating summary for PR on branch {branch}"},
+                   _cid_get())
         result = list_github_prs(github_owner, github_repo_name, branch, github_token)
         log.info("CI [step 2a] list_prs done | %s", result[:200])
         return result
@@ -109,6 +112,9 @@ def build_agent() -> LlmAgent:
     def post_commit_status(sha: str, state: str, description: str) -> str:
         """Post a commit status to GitHub. state: success | failure | pending | error."""
         log.info("CI [step 7] post_commit_status | sha=%.12s state=%s desc=%.80s", sha, state, description)
+        emit_event("CIAgent", "thinking",
+                   {"summary": f"Pushing commit status: state={state} — {description}"},
+                   _cid_get())
         result = post_github_commit_status(github_owner, github_repo_name, sha, state, description, github_token)
         log.info("CI [step 7] post_commit_status done | %s", result)
         return result
@@ -155,7 +161,7 @@ def build_agent() -> LlmAgent:
         """Poll a Cloud Build job. Call every 30s until status is SUCCESS or FAILURE."""
         log.info("CI [step 5] get_ci_build_status | build_id=%s", build_id)
         emit_event("CIAgent", "thinking",
-                   {"summary": f"Running test suite — polling build {build_id}"},
+                   {"summary": f"Cloud Build: polling Docker image build {build_id[:8]}…"},
                    _cid_get())
         result = _get_build_status_impl(project_id, build_id)
         log.info("CI [step 5] get_ci_build_status done | %s", result)
@@ -164,6 +170,9 @@ def build_agent() -> LlmAgent:
     def verify_image(image_tag: str) -> str:
         """Confirm image_tag exists in Artifact Registry after a successful build."""
         log.info("CI [step 6] verify_image | tag=%s", image_tag)
+        emit_event("CIAgent", "thinking",
+                   {"summary": f"Artifact Registry: verifying image {image_tag.split('/')[-1]}"},
+                   _cid_get())
         result = verify_artifact_image(project_id, region, artifact_repo, image_tag)
         log.info("CI [step 6] verify_image done | %s", result)
         return result
