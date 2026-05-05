@@ -137,7 +137,7 @@ def run_backend_tests(
         return json.dumps({"error": f"pytest build submission failed: {e}"})
 
     client = _cb_client()
-    for _ in range(10):
+    for _ in range(20):
         time.sleep(30)
         b = client.get_build(project_id=project_id, id=build_id)
         status = b.status.name
@@ -150,7 +150,7 @@ def run_backend_tests(
                 "build_id": build_id,
             })
 
-    return json.dumps({"error": "pytest build timed out after 5 minutes", "build_id": build_id})
+    return json.dumps({"error": "pytest build timed out after 10 minutes", "build_id": build_id})
 
 
 def submit_cloud_build(
