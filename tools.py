@@ -80,7 +80,7 @@ def _gh(method: str, url: str, **kwargs) -> requests.Response:
                 adapter = _TLS12Adapter(pool_connections=1, pool_maxsize=1, max_retries=0)
                 session.mount("https://", adapter)
                 session.mount("http://", adapter)
-                return session.request(method, url, headers=headers, **kwargs)
+                return session.request(method, url, headers=headers, timeout=15, **kwargs)
         except (requests.exceptions.SSLError, requests.exceptions.ConnectionError) as e:
             log.warning("GitHub %s attempt %d failed: %s", method, attempt + 1, e)
             last_exc = e
