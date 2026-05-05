@@ -376,8 +376,16 @@ DinoQuest CI Pipeline — <SCOPE> scope
 **Overall: <PASSED ✅ / FAILED ❌>**
 ```
 
-After posting the PR comment, output the same pipeline diagram as your reply text so it
-appears in Slack. Use ✅ ❌ ⏭️ for each step.
+After posting the PR comment, output the following as your final reply text so it appears in Slack. Start with a header, then the pipeline diagram. Use ✅ ❌ ⏭️ for each step.
+
+```
+## CI Pipeline Report — <branch_name>
+**PR:** #<number> — <title>
+**Commit:** <short_sha>
+**Result:** <PASSED ✅ / FAILED ❌>
+
+<pipeline diagram with ticks>
+```
 
 ---
 
