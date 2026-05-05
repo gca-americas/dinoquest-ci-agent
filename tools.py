@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import ssl
+import threading
 import time
 
 import certifi
@@ -15,6 +16,7 @@ from utils import emit_event
 
 log = logging.getLogger(__name__)
 GITHUB_API = "https://api.github.com"
+_gh_lock = threading.Lock()  # serialize SSL handshakes — concurrent threads corrupt OpenSSL 3 error queue
 _DEMO_MODE = os.environ.get("DEMO_MODE", "").lower() in ("1", "true", "yes")
 
 # Cloud Build 2nd gen (connectedRepository) config — must be set in env
@@ -57,6 +59,7 @@ def _make_tls12_context() -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    ctx.options |= ssl.OP_NO_TLSv1_3  # belt-and-suspenders: OpenSSL option level
     ctx.load_verify_locations(certifi.where())
     return ctx
 
@@ -76,11 +79,12 @@ def _gh(method: str, url: str, **kwargs) -> requests.Response:
         if attempt:
             time.sleep(min(2 ** attempt, 30))
         try:
-            with requests.Session() as session:
-                adapter = _TLS12Adapter(pool_connections=1, pool_maxsize=1, max_retries=0)
-                session.mount("https://", adapter)
-                session.mount("http://", adapter)
-                return session.request(method, url, headers=headers, timeout=15, **kwargs)
+            with _gh_lock:
+                with requests.Session() as session:
+                    adapter = _TLS12Adapter(pool_connections=1, pool_maxsize=1, max_retries=0)
+                    session.mount("https://", adapter)
+                    session.mount("http://", adapter)
+                    return session.request(method, url, headers=headers, timeout=15, **kwargs)
         except (requests.exceptions.SSLError, requests.exceptions.ConnectionError) as e:
             log.warning("GitHub %s attempt %d failed: %s", method, attempt + 1, e)
             last_exc = e
