@@ -274,16 +274,32 @@ def verify_artifact_image(project_id: str, region: str, repo: str, image_tag: st
         return json.dumps({"found": True, "image_tag": image_tag, "checked": 1})
     creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
     creds.refresh(google.auth.transport.requests.Request())
-    url = (
+    base_url = (
         f"https://artifactregistry.googleapis.com/v1"
         f"/projects/{project_id}/locations/{region}/repositories/{repo}/dockerImages"
     )
-    resp = requests.get(url, headers={"Authorization": f"Bearer {creds.token}"}, timeout=30)
-    images = resp.json().get("dockerImages", [])
     # image_tag may be a full URI (registry/repo/image:tag) — extract just the tag portion for comparison
     tag_only = image_tag.split(":")[-1] if ":" in image_tag else image_tag
-    found = any(tag_only in img.get("tags", []) for img in images)
-    return json.dumps({"found": found, "image_tag": image_tag, "checked": len(images)})
+    page_token = None
+    total_checked = 0
+    while True:
+        params = {"pageToken": page_token} if page_token else {}
+        resp = requests.get(
+            base_url,
+            params=params,
+            headers={"Authorization": f"Bearer {creds.token}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        images = data.get("dockerImages", [])
+        total_checked += len(images)
+        if any(tag_only in img.get("tags", []) for img in images):
+            return json.dumps({"found": True, "image_tag": image_tag, "checked": total_checked})
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    return json.dumps({"found": False, "image_tag": image_tag, "checked": total_checked})
 
 
 def get_github_pr(owner: str, repo: str, pr_number: int, github_token: str) -> str:
