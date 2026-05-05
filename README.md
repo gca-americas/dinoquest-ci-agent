@@ -281,6 +281,24 @@ gcloud run services update ci-agent --image=$IMAGE --region=us-central1
 
 ---
 
+## Cloud Run background thread behavior
+
+When CIAgent receives an A2A request from RemediationAgent, it immediately returns an
+acknowledgment and runs the full CI pipeline in a background thread. This keeps the
+caller's HTTP connection short, but has an important Cloud Run implication:
+
+After the ACK is returned, Cloud Run has no active request. It can scale down the
+instance after the idle timeout (~15 min in practice). CIAgent's pipeline takes 3–5 min.
+This is the same risk CDAgent already accepts, and it works in the demo. The `daemon=False`
+flag tells Python not to exit until the thread finishes, but Cloud Run sends SIGKILL
+regardless after the grace period. If you want a guarantee, set `min-instances=1` on
+both agents — that keeps the instance alive permanently. For a demo this is the right
+call anyway (no cold starts).
+
+The deploy command above already includes `--min-instances=1` for this reason.
+
+---
+
 ## Demo mode (keynote / live demo)
 
 Set `DEMO_MODE=true` and the full pipeline runs end-to-end in ~60 seconds.
