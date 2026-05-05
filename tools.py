@@ -395,6 +395,8 @@ def post_github_pr_comment(owner: str, repo: str, pr_number: int, body: str, git
         headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
         timeout=30,
     )
+    if not resp.ok:
+        return json.dumps({"error": resp.text[:200], "http_status": resp.status_code})
     return json.dumps({"http_status": resp.status_code})
 
 
