@@ -303,31 +303,37 @@ def verify_artifact_image(project_id: str, region: str, repo: str, image_tag: st
 def get_github_pr(owner: str, repo: str, pr_number: int, github_token: str) -> str:
     """Get PR details: branch, SHA, title, body."""
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
-    resp = _gh("GET", url,
-        headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
-        timeout=30,
-    )
-    data = resp.json()
-    return json.dumps({
-        "number": data.get("number"),
-        "title": data.get("title"),
-        "body": data.get("body"),
-        "branch": data.get("head", {}).get("ref"),
-        "sha": data.get("head", {}).get("sha"),
-        "state": data.get("state"),
-    })
+    try:
+        resp = _gh("GET", url,
+            headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
+            timeout=30,
+        )
+        data = resp.json()
+        return json.dumps({
+            "number": data.get("number"),
+            "title": data.get("title"),
+            "body": data.get("body"),
+            "branch": data.get("head", {}).get("ref"),
+            "sha": data.get("head", {}).get("sha"),
+            "state": data.get("state"),
+        })
+    except Exception as e:
+        return json.dumps({"error": f"GitHub API call failed: {e}"})
 
 
 def list_github_prs(owner: str, repo: str, branch: str, github_token: str) -> str:
     """Find open PRs for a given head branch."""
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls"
-    resp = _gh("GET", url,
-        params={"head": f"{owner}:{branch}", "state": "open"},
-        headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
-        timeout=30,
-    )
-    prs = [{"number": p["number"], "title": p["title"], "sha": p["head"]["sha"]} for p in resp.json()]
-    return json.dumps({"prs": prs})
+    try:
+        resp = _gh("GET", url,
+            params={"head": f"{owner}:{branch}", "state": "open"},
+            headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
+            timeout=30,
+        )
+        prs = [{"number": p["number"], "title": p["title"], "sha": p["head"]["sha"]} for p in resp.json()]
+        return json.dumps({"prs": prs})
+    except Exception as e:
+        return json.dumps({"error": f"GitHub API call failed: {e}"})
 
 
 def create_github_pr(
@@ -335,36 +341,45 @@ def create_github_pr(
 ) -> str:
     """Create a GitHub pull request. Returns the PR number and SHA."""
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls"
-    resp = _gh("POST", url,
-        json={"title": title, "body": body, "head": head, "base": base},
-        headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
-        timeout=30,
-    )
-    data = resp.json()
-    if resp.status_code == 422:
-        return json.dumps({"error": "already_exists", "message": data.get("message", "")})
-    return json.dumps({"number": data.get("number"), "sha": data.get("head", {}).get("sha"), "url": data.get("html_url")})
+    try:
+        resp = _gh("POST", url,
+            json={"title": title, "body": body, "head": head, "base": base},
+            headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
+            timeout=30,
+        )
+        data = resp.json()
+        if resp.status_code == 422:
+            return json.dumps({"error": "already_exists", "message": data.get("message", "")})
+        return json.dumps({"number": data.get("number"), "sha": data.get("head", {}).get("sha"), "url": data.get("html_url")})
+    except Exception as e:
+        return json.dumps({"error": f"GitHub API call failed: {e}"})
 
 
 def get_github_pr_files(owner: str, repo: str, pr_number: int, github_token: str) -> str:
     """Get the list of files changed in a PR."""
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}/files"
-    resp = _gh("GET", url,
-        headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
-        timeout=30,
-    )
-    files = [{"filename": f["filename"], "status": f["status"], "additions": f["additions"], "deletions": f["deletions"]} for f in resp.json()]
-    return json.dumps({"files": files, "count": len(files)})
+    try:
+        resp = _gh("GET", url,
+            headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
+            timeout=30,
+        )
+        files = [{"filename": f["filename"], "status": f["status"], "additions": f["additions"], "deletions": f["deletions"]} for f in resp.json()]
+        return json.dumps({"files": files, "count": len(files)})
+    except Exception as e:
+        return json.dumps({"error": f"GitHub API call failed: {e}"})
 
 
 def get_github_pr_diff(owner: str, repo: str, pr_number: int, github_token: str) -> str:
     """Get the raw unified diff for a PR. Used for secret scanning."""
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
-    resp = _gh("GET", url,
-        headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3.diff"},
-        timeout=30,
-    )
-    return json.dumps({"diff": resp.text[:8000]})
+    try:
+        resp = _gh("GET", url,
+            headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3.diff"},
+            timeout=30,
+        )
+        return json.dumps({"diff": resp.text[:8000]})
+    except Exception as e:
+        return json.dumps({"error": f"GitHub API call failed: {e}"})
 
 
 def post_github_commit_status(
@@ -377,25 +392,31 @@ def post_github_commit_status(
 ) -> str:
     """Post a commit status to GitHub. state: success | failure | pending | error."""
     url = f"{GITHUB_API}/repos/{owner}/{repo}/statuses/{sha}"
-    resp = _gh("POST", url,
-        json={"state": state, "description": description[:140], "context": "ci-agent"},
-        headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
-        timeout=30,
-    )
-    return json.dumps({"http_status": resp.status_code, "state": state})
+    try:
+        resp = _gh("POST", url,
+            json={"state": state, "description": description[:140], "context": "ci-agent"},
+            headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
+            timeout=30,
+        )
+        return json.dumps({"http_status": resp.status_code, "state": state})
+    except Exception as e:
+        return json.dumps({"error": f"GitHub API call failed: {e}"})
 
 
 def post_github_pr_comment(owner: str, repo: str, pr_number: int, body: str, github_token: str) -> str:
     """Post a comment with the CI report on a GitHub pull request."""
     url = f"{GITHUB_API}/repos/{owner}/{repo}/issues/{pr_number}/comments"
-    resp = _gh("POST", url,
-        json={"body": body},
-        headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
-        timeout=30,
-    )
-    if not resp.ok:
-        return json.dumps({"error": resp.text[:200], "http_status": resp.status_code})
-    return json.dumps({"http_status": resp.status_code})
+    try:
+        resp = _gh("POST", url,
+            json={"body": body},
+            headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
+            timeout=30,
+        )
+        if not resp.ok:
+            return json.dumps({"error": resp.text[:200], "http_status": resp.status_code})
+        return json.dumps({"http_status": resp.status_code})
+    except Exception as e:
+        return json.dumps({"error": f"GitHub API call failed: {e}"})
 
 
 def call_dinoagent_for_help(failure_log: str, correlation_id: str) -> str:
