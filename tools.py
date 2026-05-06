@@ -19,10 +19,10 @@ GITHUB_API = "https://api.github.com"
 _gh_lock = threading.Lock()  # serialize SSL handshakes — concurrent threads corrupt OpenSSL 3 error queue
 _DEMO_MODE = os.environ.get("DEMO_MODE", "").lower() in ("1", "true", "yes")
 
-# Cloud Build 2nd gen (connectedRepository) config — must be set in env
-_CB_CONNECTION = os.environ["CLOUD_BUILD_CONNECTION"]
-_CB_REPO = os.environ["CLOUD_BUILD_REPO"]
-_CB_REGION = os.environ["CLOUD_BUILD_REGION"]
+# Cloud Build 2nd gen (connectedRepository) config — required in Cloud Run, optional locally in DEMO_MODE
+_CB_CONNECTION = os.environ.get("CLOUD_BUILD_CONNECTION", "")
+_CB_REPO = os.environ.get("CLOUD_BUILD_REPO", "")
+_CB_REGION = os.environ.get("CLOUD_BUILD_REGION", "us-central1")
 
 def _cb_client() -> cloudbuild_v1.CloudBuildClient:
     """Cloud Build client — used only for get_build polling (no DeveloperConnectConfig needed)."""
@@ -59,7 +59,6 @@ def _make_tls12_context() -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.maximum_version = ssl.TLSVersion.TLSv1_2
-    ctx.options |= ssl.OP_NO_TLSv1_3  # belt-and-suspenders: OpenSSL option level
     ctx.load_verify_locations(certifi.where())
     return ctx
 
@@ -185,17 +184,17 @@ def submit_cloud_build(
             creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
             creds.refresh(google.auth.transport.requests.Request())
             auth_header = {"Authorization": f"Bearer {creds.token}"}
-            get_resp = requests.get(
+            get_resp = _gh(
+                "GET",
                 f"https://{registry_host}/v2/{image_path}/manifests/{source_tag}",
                 headers={**auth_header, "Accept": "application/vnd.docker.distribution.manifest.v2+json"},
-                timeout=30,
             )
             get_resp.raise_for_status()
-            put_resp = requests.put(
+            put_resp = _gh(
+                "PUT",
                 f"https://{registry_host}/v2/{image_path}/manifests/latest",
                 data=get_resp.content,
                 headers={**auth_header, "Content-Type": get_resp.headers.get("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")},
-                timeout=30,
             )
             put_resp.raise_for_status()
             log.info("[DEMO] Retagged %s → latest | fake_build_id=%s image=%s", source_tag, fake_id, latest_uri)
@@ -344,17 +343,37 @@ def list_github_prs(owner: str, repo: str, branch: str, github_token: str) -> st
 def create_github_pr(
     owner: str, repo: str, title: str, body: str, head: str, base: str, github_token: str
 ) -> str:
-    """Create a GitHub pull request. Returns the PR number and SHA."""
+    """Create a GitHub pull request. Returns the PR number and SHA.
+    If a PR already exists for this branch, finds and returns it instead of failing."""
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls"
+    auth_headers = {"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"}
     try:
         resp = _gh("POST", url,
             json={"title": title, "body": body, "head": head, "base": base},
-            headers={"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"},
+            headers=auth_headers,
             timeout=30,
         )
         data = resp.json()
         if resp.status_code == 422:
-            return json.dumps({"error": "already_exists", "message": data.get("message", "")})
+            errors = data.get("errors", [])
+            is_already_exists = any(e.get("code") == "already_exists" for e in errors)
+            if is_already_exists:
+                for state in ("open", "all"):
+                    search = _gh("GET", url,
+                        params={"head": f"{owner}:{head}", "state": state, "per_page": 5},
+                        headers=auth_headers,
+                    )
+                    prs = search.json()
+                    if isinstance(prs, list) and prs:
+                        pr = prs[0]
+                        return json.dumps({
+                            "number": pr["number"],
+                            "sha": pr["head"]["sha"],
+                            "url": pr["html_url"],
+                            "already_existed": True,
+                        })
+            gh_errors = "; ".join(e.get("message", e.get("code", "")) for e in errors if e)
+            return json.dumps({"error": "pr_creation_failed", "message": data.get("message", ""), "details": gh_errors or "branch may not exist or has no commits ahead of base"})
         return json.dumps({"number": data.get("number"), "sha": data.get("head", {}).get("sha"), "url": data.get("html_url")})
     except Exception as e:
         return json.dumps({"error": f"GitHub API call failed: {e}"})
@@ -376,6 +395,15 @@ def get_github_pr_files(owner: str, repo: str, pr_number: int, github_token: str
 
 def get_github_pr_diff(owner: str, repo: str, pr_number: int, github_token: str) -> str:
     """Get the raw unified diff for a PR. Used for secret scanning."""
+    if _DEMO_MODE:
+        return json.dumps({"diff": (
+            "diff --git a/backend/main.py b/backend/main.py\n"
+            "--- a/backend/main.py\n+++ b/backend/main.py\n"
+            "@@ -120,6 +120,8 @@ async def get_leaderboard():\n"
+            "-    docs = db.collection('scores').get()\n"
+            "+    docs = db.collection('scores').order_by('score', direction='DESCENDING').limit(100).get()\n"
+            " # DEMO MODE — secret scan skipped\n"
+        )})
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
     try:
         resp = _gh("GET", url,
