@@ -13,12 +13,19 @@ from google.genai import types
 from utils import emit_event, resolve_secret
 
 _cid = threading.local()
+_slack_state = threading.local()
 
 def set_correlation_id(cid: str) -> None:
     _cid.value = cid
 
 def _cid_get() -> str:
     return getattr(_cid, "value", "")
+
+def reset_slack_posted() -> None:
+    _slack_state.posted = False
+
+def was_slack_posted() -> bool:
+    return getattr(_slack_state, "posted", False)
 
 from tools import (
     create_github_pr,
@@ -50,7 +57,7 @@ AGENT_CARD = {
 }
 
 
-def build_agent() -> LlmAgent:
+def build_agent(slack_post_fn=None) -> LlmAgent:
     project_id = os.environ["GOOGLE_CLOUD_PROJECT"]
     region = os.environ.get("CLOUD_RUN_REGION", "us-central1")
     artifact_repo = os.environ.get("ARTIFACT_REGISTRY_REPO", "dinoquest")
@@ -177,6 +184,18 @@ def build_agent() -> LlmAgent:
         log.info("CI [step 6] verify_image done | %s", result)
         return result
 
+    def post_ci_report_to_slack(report: str) -> str:
+        """Post the final CI pipeline report (with ✅ ❌ ⏭️ ticks) to Slack.
+        MUST be called after post_pr_comment and BEFORE announce_a2a_to_cd / cd_agent,
+        so the CI report reaches Slack before CDAgent posts its own report."""
+        log.info("CI [step 8] post_ci_report_to_slack | len=%s", len(report or ""))
+        if slack_post_fn:
+            slack_post_fn(report)
+            _slack_state.posted = True
+            return "{\"status\": \"posted\"}"
+        log.warning("post_ci_report_to_slack: no slack_post_fn configured")
+        return "{\"status\": \"skipped\", \"reason\": \"slack disabled\"}"
+
     def announce_a2a_to_cd(message_preview: str) -> str:
         """Emit a2a_call_sent so the theater shows the animated dot flying to CDAgent.
         Always call this immediately before calling cd_agent."""
@@ -208,6 +227,10 @@ def build_agent() -> LlmAgent:
     cd_instruction = (
         "\n\nMANDATORY FINAL STEP — after post_commit_status AND post_pr_comment are both done, "
         "you MUST trigger CDAgent before your task is complete. Do NOT stop after post_pr_comment.\n"
+        "Step A0 (REQUIRED, FIRST): Call post_ci_report_to_slack with the FULL CI pipeline "
+        "report (the same pipeline diagram with ✅ ❌ ⏭️ ticks you'd put in your final reply). "
+        "This guarantees the CI report reaches Slack BEFORE CDAgent posts its own report. "
+        "Do NOT skip this — without it, Slack sees CD's message before CI's.\n"
         "Step A: Call announce_a2a_to_cd with a one-line deploy preview.\n"
         "Step B: Call cd_agent EXACTLY ONCE with:\n"
         "   'Deploy image <IMAGE_URI>\n"
@@ -269,6 +292,7 @@ def build_agent() -> LlmAgent:
             submit_build,
             get_ci_build_status,
             verify_image,
+            post_ci_report_to_slack,
             announce_a2a_to_cd,
             *([cd_agent_tool] if cd_agent_tool else []),
         ],

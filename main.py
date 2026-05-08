@@ -37,7 +37,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from agent import build_agent, set_correlation_id
+from agent import build_agent, reset_slack_posted, set_correlation_id, was_slack_posted
 from utils import emit_event, resolve_secret
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -110,7 +110,7 @@ def _post_to_slack(text: str) -> None:
 
 # ── Shared agent + session service (persistent across Slack/Chat messages) ────
 
-_agent = build_agent()
+_agent = build_agent(slack_post_fn=_post_to_slack)
 _session_service = InMemorySessionService()
 _runner = Runner(agent=_agent, app_name=APP_NAME, session_service=_session_service)
 
@@ -133,6 +133,7 @@ async def _get_or_create_session(session_id: str) -> None:
 
 async def _run_agent(task_id: str, message: str, correlation_id: str) -> str:
     set_correlation_id(correlation_id)
+    reset_slack_posted()
     await _get_or_create_session(task_id)
     final_response = ""
     async for event in _runner.run_async(
@@ -150,6 +151,9 @@ def _run_and_reply(task_id: str, message: str, correlation_id: str, reply_fn) ->
     try:
         result = asyncio.run(_run_agent(task_id, message, correlation_id))
         log.info("Agent run complete [task=%s] result_len=%d preview=%.80s", task_id, len(result or ""), (result or "")[:80])
+        if was_slack_posted():
+            log.info("Skipping final Slack post — CI report already sent via post_ci_report_to_slack tool")
+            return
         reply_fn(result)
     except Exception as e:
         log.error("Agent run error [task=%s]: %s", task_id, str(e)[:500])
