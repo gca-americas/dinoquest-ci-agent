@@ -147,18 +147,50 @@ async def _run_agent(task_id: str, message: str, correlation_id: str) -> str:
     return final_response
 
 
-def _run_and_reply(task_id: str, message: str, correlation_id: str, reply_fn) -> None:
+# Background tasks run on uvicorn's long-lived event loop via asyncio.create_task
+# instead of `threading.Thread + asyncio.run`. The old pattern closed a fresh
+# loop per request, leaving module-level async clients (e.g. RemoteA2aAgent's
+# httpx transport) bound to dead loops — which surfaced as "Event loop is
+# closed" on the next request. Strong refs are held in _BACKGROUND_TASKS
+# because asyncio is allowed to garbage-collect tasks that aren't referenced.
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def _schedule_background(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
+
+
+# Hard ceiling on a single CI turn so that no failure mode (stuck LLM, stuck
+# tool, unreachable CD) can leave the task hanging indefinitely. Slack will
+# already have the CI report by Step A0 in nearly every shape; this just
+# bounds resource lifetime.
+_AGENT_TURN_TIMEOUT_S = 300
+
+
+async def _run_and_reply_async(task_id: str, message: str, correlation_id: str, reply_fn) -> None:
     try:
-        result = asyncio.run(_run_agent(task_id, message, correlation_id))
+        result = await asyncio.wait_for(
+            _run_agent(task_id, message, correlation_id),
+            timeout=_AGENT_TURN_TIMEOUT_S,
+        )
         log.info("Agent run complete [task=%s] result_len=%d preview=%.80s", task_id, len(result or ""), (result or "")[:80])
         if was_slack_posted():
             log.info("Skipping final Slack post — CI report already sent via post_ci_report_to_slack tool")
             return
-        reply_fn(result)
+        # reply_fn uses requests.Session (sync); off-load so it doesn't block the loop.
+        await asyncio.to_thread(reply_fn, result)
+    except asyncio.TimeoutError:
+        log.warning("Agent run timed out after %ds [task=%s]", _AGENT_TURN_TIMEOUT_S, task_id)
+        if not was_slack_posted():
+            await asyncio.to_thread(reply_fn, f"CI run timed out after {_AGENT_TURN_TIMEOUT_S}s — see logs.")
     except Exception as e:
         log.error("Agent run error [task=%s]: %s", task_id, str(e)[:500])
         log.exception("Background agent run failed for task %s", task_id)
-        reply_fn(f"CI run failed: {e}")
+        if not was_slack_posted():
+            await asyncio.to_thread(reply_fn, f"CI run failed: {e}")
 
 
 # ── Middleware: handle A2A task requests asynchronously ───────────────────────
@@ -183,11 +215,9 @@ class _A2AAsyncMiddleware(BaseHTTPMiddleware):
                     set_correlation_id(cid)
                 log.info("A2A message received | cid=%s | text=%.200s", cid, text)
 
-                threading.Thread(
-                    target=_run_and_reply,
-                    args=(task_id, text, cid, _post_to_slack),
-                    daemon=False,
-                ).start()
+                _schedule_background(
+                    _run_and_reply_async(task_id, text, cid, _post_to_slack)
+                )
 
                 ack = json.dumps({
                     "jsonrpc": "2.0",
@@ -238,11 +268,9 @@ async def handle_slack(request: Request) -> Response:
     }, task_id)
     log.info("Slack message from %s: %.100s", user_name, text)
 
-    threading.Thread(
-        target=_run_and_reply,
-        args=(task_id, text, task_id, _post_to_slack),
-        daemon=False,
-    ).start()
+    _schedule_background(
+        _run_and_reply_async(task_id, text, task_id, _post_to_slack)
+    )
 
     return JSONResponse({
         "response_type": "in_channel",
@@ -284,11 +312,9 @@ async def handle_gchat(request: Request) -> Response:
     }, task_id)
     log.info("GChat message from %s: %.100s", user_name, text)
 
-    threading.Thread(
-        target=_run_and_reply,
-        args=(task_id, text, task_id, _post_to_slack),
-        daemon=False,
-    ).start()
+    _schedule_background(
+        _run_and_reply_async(task_id, text, task_id, _post_to_slack)
+    )
 
     return JSONResponse({"text": f"🔨 CIAgent on it: {text[:100]}"})
 

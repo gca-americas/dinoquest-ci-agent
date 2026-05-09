@@ -1,6 +1,6 @@
 import logging
 import os
-import threading
+from contextvars import ContextVar
 from pathlib import Path
 
 from google.adk.agents import LlmAgent
@@ -12,20 +12,22 @@ from google.genai import types
 
 from utils import emit_event, resolve_secret
 
-_cid = threading.local()
-_slack_state = threading.local()
+# ContextVars (not threading.local) so per-request state stays isolated when
+# multiple requests run concurrently as asyncio tasks on the same event loop.
+_cid_var: ContextVar[str] = ContextVar("ci_cid", default="")
+_slack_posted_var: ContextVar[bool] = ContextVar("ci_slack_posted", default=False)
 
 def set_correlation_id(cid: str) -> None:
-    _cid.value = cid
+    _cid_var.set(cid)
 
 def _cid_get() -> str:
-    return getattr(_cid, "value", "")
+    return _cid_var.get()
 
 def reset_slack_posted() -> None:
-    _slack_state.posted = False
+    _slack_posted_var.set(False)
 
 def was_slack_posted() -> bool:
-    return getattr(_slack_state, "posted", False)
+    return _slack_posted_var.get()
 
 from tools import (
     create_github_pr,
@@ -191,7 +193,7 @@ def build_agent(slack_post_fn=None) -> LlmAgent:
         log.info("CI [step 8] post_ci_report_to_slack | len=%s", len(report or ""))
         if slack_post_fn:
             slack_post_fn(report)
-            _slack_state.posted = True
+            _slack_posted_var.set(True)
             return "{\"status\": \"posted\"}"
         log.warning("post_ci_report_to_slack: no slack_post_fn configured")
         return "{\"status\": \"skipped\", \"reason\": \"slack disabled\"}"
