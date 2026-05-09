@@ -186,24 +186,11 @@ def build_agent(slack_post_fn=None) -> LlmAgent:
         log.info("CI [step 6] verify_image done | %s", result)
         return result
 
-    def post_ci_report_to_slack(report: str) -> str:
-        """Post the final CI pipeline report (with ✅ ❌ ⏭️ ticks) to Slack.
-        MUST be called after post_pr_comment and BEFORE announce_a2a_to_cd / cd_agent,
-        so the CI report reaches Slack before CDAgent posts its own report."""
-        log.info("CI [step 8] post_ci_report_to_slack | len=%s", len(report or ""))
-        if slack_post_fn:
-            slack_post_fn(report)
-            _slack_posted_var.set(True)
-            return "{\"status\": \"posted\"}"
-        log.warning("post_ci_report_to_slack: no slack_post_fn configured")
-        return "{\"status\": \"skipped\", \"reason\": \"slack disabled\"}"
-
     def announce_a2a_to_cd(ci_report: str, deploy_preview: str) -> str:
         """Hand off to CDAgent. This is atomic:
           1. Posts the FULL CI pipeline report (ci_report) to Slack so the user
              sees the CI outcome immediately — before cd_agent is even called.
-             This is the single source of the CI Slack message; do NOT also call
-             post_ci_report_to_slack.
+             This is the single source of the CI Slack message.
           2. Emits the a2a_call_sent event for the theater animation.
         Call this IMMEDIATELY before cd_agent so the user is notified the moment
         the handoff begins, regardless of how long CD takes to ack or finish.
@@ -250,8 +237,7 @@ def build_agent(slack_post_fn=None) -> LlmAgent:
         "   deploy_preview = one-line deploy summary for the theater (e.g. "
         "'Deploy <branch> @ <sha[:7]>').\n"
         "announce_a2a_to_cd posts the CI report to Slack atomically as part of this step "
-        "so the user is notified the instant the handoff begins. Do NOT call "
-        "post_ci_report_to_slack separately — announce_a2a_to_cd handles that.\n"
+        "so the user is notified the instant the handoff begins.\n"
         "Step B (IMMEDIATELY AFTER A): Call cd_agent EXACTLY ONCE with:\n"
         "   'Deploy image <IMAGE_URI>\n"
         "   PR: #<PR_NUMBER> — <PR_TITLE>\n"
@@ -315,7 +301,6 @@ def build_agent(slack_post_fn=None) -> LlmAgent:
             submit_build,
             get_ci_build_status,
             verify_image,
-            post_ci_report_to_slack,
             announce_a2a_to_cd,
             *([cd_agent_tool] if cd_agent_tool else []),
         ],
