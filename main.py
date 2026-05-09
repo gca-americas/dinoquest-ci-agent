@@ -179,7 +179,7 @@ async def _run_and_reply_async(task_id: str, message: str, correlation_id: str, 
         )
         log.info("Agent run complete [task=%s] result_len=%d preview=%.80s", task_id, len(result or ""), (result or "")[:80])
         if was_slack_posted():
-            log.info("Skipping final Slack post — CI report already sent via post_ci_report_to_slack tool")
+            log.info("Skipping final Slack post — CI report already sent via announce_a2a_to_cd")
             return
         # reply_fn uses requests.Session (sync); off-load so it doesn't block the loop.
         await asyncio.to_thread(reply_fn, result)
