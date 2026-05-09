@@ -198,13 +198,27 @@ def build_agent(slack_post_fn=None) -> LlmAgent:
         log.warning("post_ci_report_to_slack: no slack_post_fn configured")
         return "{\"status\": \"skipped\", \"reason\": \"slack disabled\"}"
 
-    def announce_a2a_to_cd(message_preview: str) -> str:
-        """Emit a2a_call_sent so the theater shows the animated dot flying to CDAgent.
-        Always call this immediately before calling cd_agent."""
+    def announce_a2a_to_cd(ci_report: str, deploy_preview: str) -> str:
+        """Hand off to CDAgent. This is atomic:
+          1. Posts the FULL CI pipeline report (ci_report) to Slack so the user
+             sees the CI outcome immediately — before cd_agent is even called.
+             This is the single source of the CI Slack message; do NOT also call
+             post_ci_report_to_slack.
+          2. Emits the a2a_call_sent event for the theater animation.
+        Call this IMMEDIATELY before cd_agent so the user is notified the moment
+        the handoff begins, regardless of how long CD takes to ack or finish.
+        ci_report      — full pipeline diagram with ✅ ❌ ⏭️ ticks for every step.
+        deploy_preview — one-line summary for the theater bubble."""
+        if slack_post_fn:
+            slack_post_fn(ci_report)
+            _slack_posted_var.set(True)
+            log.info("CI [step 8] CI report posted to Slack via announce_a2a_to_cd | len=%s", len(ci_report or ""))
+        else:
+            log.warning("announce_a2a_to_cd: no slack_post_fn configured — CI report not posted")
         emit_event("CIAgent", "a2a_call_sent", {
             "target_agent": "CDAgent",
             "method": "deploy",
-            "args_preview": message_preview[:200],
+            "args_preview": deploy_preview[:200],
         }, _cid_get())
         return "{\"status\": \"announced\"}"
 
@@ -229,12 +243,16 @@ def build_agent(slack_post_fn=None) -> LlmAgent:
     cd_instruction = (
         "\n\nMANDATORY FINAL STEP — after post_commit_status AND post_pr_comment are both done, "
         "you MUST trigger CDAgent before your task is complete. Do NOT stop after post_pr_comment.\n"
-        "Step A0 (REQUIRED, FIRST): Call post_ci_report_to_slack with the FULL CI pipeline "
-        "report (the same pipeline diagram with ✅ ❌ ⏭️ ticks you'd put in your final reply). "
-        "This guarantees the CI report reaches Slack BEFORE CDAgent posts its own report. "
-        "Do NOT skip this — without it, Slack sees CD's message before CI's.\n"
-        "Step A: Call announce_a2a_to_cd with a one-line deploy preview.\n"
-        "Step B: Call cd_agent EXACTLY ONCE with:\n"
+        "Step A (REQUIRED, FIRST): Call announce_a2a_to_cd with TWO arguments:\n"
+        "   ci_report      = the FULL CI pipeline report (same pipeline diagram with "
+        "✅ ❌ ⏭️ ticks you would put in your final reply, including the 'CD Handover' "
+        "row marked as triggered). This is what gets posted to Slack — make it complete.\n"
+        "   deploy_preview = one-line deploy summary for the theater (e.g. "
+        "'Deploy <branch> @ <sha[:7]>').\n"
+        "announce_a2a_to_cd posts the CI report to Slack atomically as part of this step "
+        "so the user is notified the instant the handoff begins. Do NOT call "
+        "post_ci_report_to_slack separately — announce_a2a_to_cd handles that.\n"
+        "Step B (IMMEDIATELY AFTER A): Call cd_agent EXACTLY ONCE with:\n"
         "   'Deploy image <IMAGE_URI>\n"
         "   PR: #<PR_NUMBER> — <PR_TITLE>\n"
         "   Branch: <BRANCH_NAME>\n"
@@ -242,7 +260,10 @@ def build_agent(slack_post_fn=None) -> LlmAgent:
         "   Changed files: <comma-separated filenames>'\n"
         "   IMAGE_URI = the EXACT `image_uri` field from the submit_build tool response. "
         "Never construct or invent it — copy it verbatim.\n"
-        "Your task is only complete after cd_agent returns. Do NOT call it again after that."
+        "ORDERING IS CRITICAL: Step A first, Step B second. Do not interleave other tool "
+        "calls between them. Do not call cd_agent before announce_a2a_to_cd. "
+        "cd_agent only returns a fast 'task accepted' ack; CD's full report posts to Slack "
+        "later from CDAgent itself."
     ) if cd_agent_tool else ""
 
     _retry_config = types.GenerateContentConfig(
