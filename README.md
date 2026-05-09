@@ -300,18 +300,20 @@ The deploy command above already includes `--min-instances=1` for this reason.
 ### Background task timeout
 
 `_AGENT_TURN_TIMEOUT_S` in `main.py` caps how long a single CI run may take before
-`asyncio.wait_for` cancels it and the task is logged as timed out. Default: **300s
-(5 min)** — generous for a normal CI pipeline including the ~1s CDAgent handoff ack.
+`asyncio.wait_for` cancels it and the task is logged as timed out. Default: **600s
+(10 min)** — sized to fit a steady-state run on `gemini-3-flash-preview`
+(~15s per LLM turn × 15–20 turns + tool waits) with margin for the CDAgent handoff ack.
 
 On timeout:
-- If `post_ci_report_to_slack` already ran in the agent's flow, no extra Slack
-  message is posted (the user already has the CI report).
-- Otherwise, a `"CI run timed out after 300s — see logs."` notice is posted so
+- If the CI report has already been posted (via `announce_a2a_to_cd`), no extra
+  Slack message is posted (the user already has the CI report).
+- Otherwise, a `"CI run timed out after 600s — see logs."` notice is posted so
   the user isn't left wondering.
 
 Raise this value if you've extended the pipeline (e.g. real `pytest`, longer
 Cloud Build) and the cap starts hitting on legitimate runs. Lower it if you'd
-rather fail fast in a demo.
+rather fail fast in a demo. If you switch to a faster model (e.g.
+`gemini-2.5-flash`, which runs ~10s per turn), 300s usually suffices.
 
 ---
 

@@ -164,10 +164,11 @@ def _schedule_background(coro) -> asyncio.Task:
 
 
 # Hard ceiling on a single CI turn so that no failure mode (stuck LLM, stuck
-# tool, unreachable CD) can leave the task hanging indefinitely. Slack will
-# already have the CI report by Step A0 in nearly every shape; this just
-# bounds resource lifetime.
-_AGENT_TURN_TIMEOUT_S = 300
+# tool, unreachable CD) can leave the task hanging indefinitely. Sized to fit
+# a steady-state run on gemini-3-flash-preview (~15s per LLM turn × ~15-20
+# turns + tool waits). Slack will already have the CI report by the announce
+# step in nearly every shape; this just bounds resource lifetime.
+_AGENT_TURN_TIMEOUT_S = 600
 
 
 async def _run_and_reply_async(task_id: str, message: str, correlation_id: str, reply_fn) -> None:
